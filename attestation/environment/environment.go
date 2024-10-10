@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/in-toto/go-witness/attestation"
+	envCapture "github.com/in-toto/go-witness/environment"
 	"github.com/in-toto/go-witness/registry"
 	"github.com/invopop/jsonschema"
 )
@@ -62,7 +63,7 @@ func init() {
 					return a, fmt.Errorf("unexpected attestor type: %T is not a environment attestor", a)
 				}
 
-				WithFilterVarsEnabled()(envAttestor)
+				envCapture.WithFilterVarsEnabled()(envAttestor.capture)
 				return envAttestor, nil
 			},
 		),
@@ -76,7 +77,7 @@ func init() {
 					return a, fmt.Errorf("unexpected attestor type: %T is not a environment attestor", a)
 				}
 
-				WithDisableDefaultSensitiveList()(envAttestor)
+				envCapture.WithDisableDefaultSensitiveList()(envAttestor.capture)
 				return envAttestor, nil
 			},
 		),
@@ -90,7 +91,7 @@ func init() {
 					return a, fmt.Errorf("unexpected attestor type: %T is not a environment attestor", a)
 				}
 
-				WithAdditionalKeys(additionalKeys)(envAttestor)
+				envCapture.WithAdditionalKeys(additionalKeys)(envAttestor.capture)
 				return envAttestor, nil
 			},
 		),
@@ -104,7 +105,7 @@ func init() {
 					return a, fmt.Errorf("unexpected attestor type: %T is not a environment attestor", a)
 				}
 
-				WithExcludeKeys(excludeKeys)(envAttestor)
+				envCapture.WithExcludeKeys(excludeKeys)(envAttestor.capture)
 				return envAttestor, nil
 			},
 		),
@@ -117,12 +118,8 @@ type Attestor struct {
 	Username  string            `json:"username"`
 	Variables map[string]string `json:"variables,omitempty"`
 
-	osEnviron                   func() []string
-	sensitiveVarsList           map[string]struct{}
-	addSensitiveVarsList        map[string]struct{}
-	excludeSensitiveVarsList    map[string]struct{}
-	filterVarsEnabled           bool
-	disableSensitiveVarsDefault bool
+	capture   *envCapture.Capture
+	osEnviron func() []string
 }
 
 type Option func(*Attestor)
@@ -169,9 +166,10 @@ func WithCustomEnv(osEnviron func() []string) Option {
 
 func New(opts ...Option) *Attestor {
 	attestor := &Attestor{
-		sensitiveVarsList:        DefaultSensitiveEnvList(),
+		sensitiveVarsList:        envCapture.DefaultSensitiveEnvList(),
 		addSensitiveVarsList:     map[string]struct{}{},
 		excludeSensitiveVarsList: map[string]struct{}{},
+		capture:                  *envCapture.New(),
 	}
 
 	attestor.osEnviron = os.Environ
@@ -211,26 +209,7 @@ func (a *Attestor) Attest(ctx *attestation.AttestationContext) error {
 		a.Username = user.Username
 	}
 
-	// Prepare sensitive keys list.
-	var finalSensitiveKeysList map[string]struct{}
-	if a.disableSensitiveVarsDefault {
-		a.sensitiveVarsList = map[string]struct{}{}
-	}
-	finalSensitiveKeysList = a.sensitiveVarsList
-	for k, v := range a.addSensitiveVarsList {
-		finalSensitiveKeysList[k] = v
-	}
-
-	// Filter or obfuscate
-	if a.filterVarsEnabled {
-		FilterEnvironmentArray(a.osEnviron(), finalSensitiveKeysList, a.excludeSensitiveVarsList, func(key, val, _ string) {
-			a.Variables[key] = val
-		})
-	} else {
-		ObfuscateEnvironmentArray(a.osEnviron(), finalSensitiveKeysList, a.excludeSensitiveVarsList, func(key, val, _ string) {
-			a.Variables[key] = val
-		})
-	}
+	a.Variables = a.capture.Capture(ctx, a.osEnviron())
 
 	return nil
 }

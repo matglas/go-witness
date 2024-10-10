@@ -117,6 +117,7 @@ type AttestationContext struct {
 	materials           map[string]cryptoutil.DigestSet
 	stepName            string
 	mutex               sync.RWMutex
+	environmentCapturer *environment.Capture
 }
 
 type Product struct {
@@ -228,6 +229,8 @@ func (ctx *AttestationContext) runAttestor(attestor Attestor) {
 func (ctx *AttestationContext) DirHashGlob() []glob.Glob {
 	return ctx.dirHashGlobCompiled
 }
+
+
 
 func (ctx *AttestationContext) CompletedAttestors() []CompletedAttestor {
 	ctx.mutex.RLock()
